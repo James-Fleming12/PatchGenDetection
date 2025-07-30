@@ -40,7 +40,7 @@ class PatchJEPA(nn.Module):
 
     def get_latent(self, x):
         with torch.no_grad():
-            return self.encoder(x)
+            return self.encoder(x.unsqueeze(0))
 
     def loss(self, x, target): # an input of size [B, S, d], or Batch-Size, Sequence Length, Dimension
         pass
@@ -79,6 +79,10 @@ class PatchMoco(nn.Module):
     def forward(self, x):
         pass
 
+    def get_latent(self, x):
+        with torch.no_grad():
+            return self.encoder(x.unsqueeze(0))
+
     def loss(self, pred, target):
         pass
 
@@ -89,7 +93,3 @@ class ConGenDetect(nn.Module):
 
     def forward(self, x):
         pass
-
-    def get_latent(self, x): # non-batched input
-        with torch.no_grad():
-            return self.encoder(x)
