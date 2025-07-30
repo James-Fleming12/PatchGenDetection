@@ -11,4 +11,4 @@ encoder, decoder = init_model(
     crop_size=crop_size
 )
 
-print(encoder(torch.rand(1, 3, crop_size, crop_size)).size())
+print(encoder(torch.rand(1, 3, crop_size, crop_size)).size()) # returns [batch_size, crop_size^2 / patch_size^2, 768]
