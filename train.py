@@ -29,9 +29,11 @@ def trainJEPA() -> JepaGenDetect:
     m = 0.996 # momentum
 
     unsupervised_loader = torch.DataLoader() # ...
+    image_size = 0
+    patch_size = 0
     optimizer = torch.optim.Adam()
 
-    lgen = PatchJEPA()
+    lgen = PatchJEPA(image_size, patch_size)
 
     for epoch in range(num_epochs):
         for imgs in unsupervised_loader:
@@ -74,4 +76,32 @@ def trainJEPA() -> JepaGenDetect:
     return patchdet
 
 def trainMOCO() -> ConGenDetect:
-    pass
+    num_epochs = 400
+    m = 0.996 # momentum
+
+    unsupervised_loader = torch.DataLoader() # ...
+    image_size = [0, 0]
+    patch_size = [0, 0]
+    optimizer = torch.optim.Adam()
+
+    lgen = PatchMoco()
+
+    for epoch in range(num_epochs):
+        for imgs in unsupervised_loader:
+            pred = lgen.encoder(imgs)
+            with torch.no_grad():
+                target = lgen.target_encoder(imgs)
+
+            loss = lgen.loss(pred, target)
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+
+            # momentum update
+            with torch.no_grad():
+                for param_q, param_k in zip(lgen.encoder.parameters(), lgen.target_encoder.parameters()):
+                    param_k.data.mul_(m).add((1.-m) * param_q.data)
+
+    patchdet = ConGenDetect(lgen)
+
+    return patchdet

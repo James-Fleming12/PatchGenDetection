@@ -79,6 +79,9 @@ class PatchMoco(nn.Module):
     def forward(self, x):
         pass
 
+    def loss(self, pred, target):
+        pass
+
 class ConGenDetect(nn.Module):
     def __init__(self, moco: PatchMoco):
         super.__init__(ConGenDetect, self)
@@ -86,3 +89,7 @@ class ConGenDetect(nn.Module):
 
     def forward(self, x):
         pass
+
+    def get_latent(self, x): # non-batched input
+        with torch.no_grad():
+            return self.encoder(x)
