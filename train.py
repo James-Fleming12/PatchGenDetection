@@ -4,9 +4,6 @@ import torch.functional as F
 
 from main import ConGenDetect, JepaGenDetect, PatchJEPA, PatchMoco
 
-from src.masks.utils import apply_masks
-from src.utils.tensors import repeat_interleave_batch
-
 def generate_nonoverlapping_masks(grid_h, grid_w, enc_ratio=0.3, pred_ratio=0.2):
     total_patches = grid_h * grid_w
     idxs = torch.randperm(total_patches)
@@ -48,17 +45,7 @@ def trainJEPA() -> JepaGenDetect:
             masks_enc = [m.to(lgen.device) for m in masks_enc]
             masks_pred = [m.to(lgen.device) for m in masks_pred]
 
-            # target encoder
-            with torch.no_grad():
-                h = lgen.target_encoder(imgs)
-                h = F.layer_norm(h, (h.size(-1),))
-                B = len(h)
-                h = apply_masks(h, masks_pred)
-                h = repeat_interleave_batch(h, B, repeat=len(masks_enc))
-
-            # prediction
-            z = lgen.encoder(imgs, masks_enc)
-            z = lgen.predictor(z, masks_enc, masks_pred)
+            z, h = lgen(imgs, masks_enc, masks_pred)
 
             loss = lgen.loss(z, h)
             loss.backward()
@@ -88,9 +75,7 @@ def trainMOCO() -> ConGenDetect:
 
     for epoch in range(num_epochs):
         for imgs in unsupervised_loader:
-            pred = lgen.encoder(imgs)
-            with torch.no_grad():
-                target = lgen.target_encoder(imgs)
+            pred, target = lgen(imgs)
 
             loss = lgen.loss(pred, target)
             loss.backward()

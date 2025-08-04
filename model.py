@@ -2,8 +2,12 @@ import copy
 
 import torch
 from torch import nn
+import torch.functional as F
 
 from src.helper import init_model
+
+from src.masks.utils import apply_masks
+from src.utils.tensors import repeat_interleave_batch
 
 class PatchJEPA(nn.Module):
     # takes some image and returns a sequence of latent tokens that describe it
@@ -35,8 +39,20 @@ class PatchJEPA(nn.Module):
         self.latent_dim = self.encoder.embed_dim # size of [d]
         # has to be set to this so the code works well with the I-JEPA library
 
-    def forward(self, x):
-        pass
+    def forward(self, x, masks_enc, masks_pred):
+        # target encoder
+        with torch.no_grad():
+            h = self.target_encoder(x)
+            h = F.layer_norm(h, (h.size(-1),))
+            B = len(h)
+            h = apply_masks(h, masks_pred)
+            h = repeat_interleave_batch(h, B, repeat=len(masks_enc))
+
+        # prediction
+        z = self.encoder(x, masks_enc) # might need (imgs)
+        z = self.predictor(z, masks_enc, masks_pred)
+
+        return z, h
 
     def get_latent(self, x):
         with torch.no_grad():
@@ -76,15 +92,64 @@ class PatchMoco(nn.Module):
         )
         self.target_encoder = copy.deepcopy(self.encoder)
 
-    def forward(self, x):
-        pass
+        self.emb_dim = self.encoder.emb_dim
+        self.criterion = PatchMocoLoss(self.emb_dim)
+
+    def forward(self, x): # expecting [B, C, H, W]
+        pred = self.encoder(x)
+        with torch.no_grad():
+            target = self.target_encoder(x)
+        return pred, target
 
     def get_latent(self, x):
         with torch.no_grad():
             return self.encoder(x.unsqueeze(0))
 
     def loss(self, pred, target):
-        pass
+        return self.criterion(pred, target)
+
+class PatchMocoLoss(nn.Module):
+    def __init__(self, emb_size, temperature=0.07, queue_size=65536):
+        super(PatchMocoLoss, self).__init__()
+        self.temperature = temperature
+        self.queue_size = queue_size
+        self.register_buffer("queue", torch.randn(queue_size, emb_size)) # non-trainable tensor
+        self.queue = F.normalize(self.queue, dim=1)
+        self.register_buffer("queue_ptr", torch.zeros(1, dtype=torch.long))
+
+    @torch.no_grad()
+    def _dequeue_and_enqueue(self, keys):
+        batch_size = keys.shape[0]
+        ptr = int(self.queue_ptr)
+
+        # Handle cases where the update exceeds queue boundaries
+        if ptr + batch_size > self.queue_size:
+            # Split the update into two parts: end of queue and start of queue
+            remaining = self.queue_size - ptr
+            self.queue[ptr:] = keys[:remaining]
+            self.queue[:batch_size - remaining] = keys[remaining:]
+        else:
+            # Standard case: single contiguous update
+            self.queue[ptr:ptr + batch_size] = keys
+        # Update pointer (modulo queue_size)
+        ptr = (ptr + batch_size) % self.queue_size
+        self.queue_ptr[0] = ptr
+
+    def forward(self, pred, target):
+        # Normalize the embeddings
+        pred = F.normalize(pred, dim=1)  # queries [B, D]
+        target = F.normalize(target, dim=1)  # keys [B, D]
+
+        l_pos = torch.einsum('nc,nc->n', [pred, target]).unsqueeze(-1) # Positive logits: Nx1
+        l_neg = torch.einsum('nc,ck->nk', [pred, self.queue.clone().detach().t()]) # Negative logits: NxK
+        logits = torch.cat([l_pos, l_neg], dim=1) # Logits: Nx(1+K)
+
+        logits /= self.temperature # Apply temperature
+
+        labels = torch.zeros(logits.shape[0], dtype=torch.long).to(pred.device) # Labels: positives are the first (0-th)
+
+        self._dequeue_and_enqueue(target) # Update the queue
+        return F.cross_entropy(logits, labels) # Compute cross entropy loss
 
 class ConGenDetect(nn.Module):
     def __init__(self, moco: PatchMoco):
