@@ -9,15 +9,29 @@ from src.helper import init_model
 from src.masks.utils import apply_masks
 from src.utils.tensors import repeat_interleave_batch
 
+from src.models.vision_transformer import Transformer
+
+class TransformerClassifier(nn.Module):
+    def __init__(self, transformer: Transformer, num_classes=2):
+        super().__init__(TransformerClassifier, self) # set num_tokens
+        self.transformer = transformer
+        self.head = nn.Linear(transformer.embed_dim, num_classes)
+
+    def foward(self, x):
+        features = self.vit(x)
+        pooled = features.mean(dim=1) # global pooling over patches
+        logits = self.head(pooled)
+        return logits
+
 class PatchJEPA(nn.Module):
     # takes some image and returns a sequence of latent tokens that describe it
     # trained contrastively so that each token is similar to the tokens of similar images
     def __init__(self, image_size, patch_size, batch_size):
         super.__init__(PatchJEPA, self)
-        assert(image_size[0] % patch_size[0] == 0, "Patch Size needs to divide Image Size")
-        assert(image_size[1] % patch_size[1] == 0, "Patch Size needs to divide Image Size")
+        assert(image_size[1] % patch_size[1] == 0 and image_size[2] % patch_size[2] == 0, "Patch Size needs to divide Image Size")
         assert(image_size[0] == patch_size[0], "Patch Size channels and Image Size channels need to match")
         assert(image_size[1] == image_size[2], "Image Size needs to be Square")
+        assert(patch_size[1] == patch_size[2], "Patch Size needs to be Square")
         self.batch_size = batch_size
         self.image_size = image_size # size of [C, H, W]
         self.patch_size = patch_size # size of [C, h, w]
@@ -36,8 +50,7 @@ class PatchJEPA(nn.Module):
         )
         self.target_encoder = copy.deepcopy(self.encoder)
 
-        self.latent_dim = self.encoder.embed_dim # size of [d]
-        # has to be set to this so the code works well with the I-JEPA library
+        self.latent_dim = self.encoder.embed_dim # has to be set to this so the code works well with the I-JEPA library
 
     def forward(self, x, masks_enc, masks_pred):
         # target encoder
@@ -65,20 +78,26 @@ class JepaGenDetect(nn.Module):
     def __init__(self, lgen: PatchJEPA):
         super.__init__(JepaGenDetect, self)
         self.lgen = lgen
+        num_tokens = self.moco.image_size[1]^2 / self.moco.patch_size[1]^2
+        t = Transformer(num_tokens=num_tokens)
+        self.classifier = TransformerClassifier(t)
 
     def forward(self, x):
-        pass
+        x = self.lgen(x)
+        x = self.classifier(x)
+        return x
 
 class PatchMoco(nn.Module):
-    def __init__(self, image_size, patch_size):
+    def __init__(self, image_size, patch_size, queue_size):
         super.__init__(PatchMoco, self)
-        assert(image_size[0] % patch_size[0] == 0, "Patch Size needs to divide Image Size")
-        assert(image_size[1] % patch_size[1] == 0, "Patch Size needs to divide Image Size")
+        assert(image_size[1] % patch_size[1] == 0 and image_size[2] % patch_size[2] == 0, "Patch Size needs to divide Image Size")
         assert(image_size[0] == patch_size[0], "Patch Size channels and Image Size channels need to match")
         assert(image_size[1] == image_size[2], "Image Size needs to be Square")
+        assert(patch_size[1] == patch_size[2], "Patch Size needs to be Square")
 
         self.image_size = image_size # size of [C, H, W]
         self.patch_size = patch_size # size of [C, h, w]
+        self.queue_size = queue_size
         if not torch.cuda.is_available():
             self.device = torch.device('cpu')
         else:
@@ -93,7 +112,7 @@ class PatchMoco(nn.Module):
         self.target_encoder = copy.deepcopy(self.encoder)
 
         self.emb_dim = self.encoder.emb_dim
-        self.criterion = PatchMocoLoss(self.emb_dim)
+        self.criterion = PatchMocoLoss(self.emb_dim, queue_size)
 
     def forward(self, x): # expecting [B, C, H, W]
         pred = self.encoder(x)
@@ -109,7 +128,7 @@ class PatchMoco(nn.Module):
         return self.criterion(pred, target)
 
 class PatchMocoLoss(nn.Module):
-    def __init__(self, emb_size, temperature=0.07, queue_size=65536):
+    def __init__(self, emb_size, queue_size=65536, temperature=0.07):
         super(PatchMocoLoss, self).__init__()
         self.temperature = temperature
         self.queue_size = queue_size
@@ -155,6 +174,11 @@ class ConGenDetect(nn.Module):
     def __init__(self, moco: PatchMoco):
         super.__init__(ConGenDetect, self)
         self.moco = moco
+        num_tokens = self.moco.image_size[1]^2 / self.moco.patch_size[1]^2
+        t = Transformer(num_tokens=num_tokens)
+        self.classifier = TransformerClassifier(t)
 
     def forward(self, x):
-        pass
+        x = self.moco(x)
+        x = self.classifier(x)
+        return x

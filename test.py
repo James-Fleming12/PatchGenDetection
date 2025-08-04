@@ -12,3 +12,4 @@ encoder, decoder = init_model(
 )
 
 print(encoder(torch.rand(1, 3, crop_size, crop_size)).size()) # returns [batch_size, crop_size^2 / patch_size^2, 768]
+# therefore returns [batch_size, num_tokens, emb_dim]

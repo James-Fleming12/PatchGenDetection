@@ -69,9 +69,10 @@ def trainMOCO() -> ConGenDetect:
     unsupervised_loader = torch.DataLoader() # ...
     image_size = [0, 0]
     patch_size = [0, 0]
+    queue_size = 0
     optimizer = torch.optim.Adam()
 
-    lgen = PatchMoco()
+    lgen = PatchMoco(image_size, patch_size, queue_size)
 
     for epoch in range(num_epochs):
         for imgs in unsupervised_loader:
