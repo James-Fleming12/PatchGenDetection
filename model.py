@@ -128,13 +128,19 @@ class PatchMoco(nn.Module):
         return self.criterion(pred, target)
 
 class PatchMocoLoss(nn.Module):
-    def __init__(self, emb_size, queue_size=65536, temperature=0.07):
+    def __init__(self, emb_size, proj_dim=256, queue_size=65536, temperature=0.07):
         super(PatchMocoLoss, self).__init__()
         self.temperature = temperature
         self.queue_size = queue_size
         self.register_buffer("queue", torch.randn(queue_size, emb_size)) # non-trainable tensor
         self.queue = F.normalize(self.queue, dim=1)
         self.register_buffer("queue_ptr", torch.zeros(1, dtype=torch.long))
+
+        self.proj = nn.Sequential( # stabilizes training by ...
+            nn.Linear(emb_size, proj_dim),
+            nn.ReLU(),
+            nn.Linear(proj_dim, proj_dim)
+        )
 
     @torch.no_grad()
     def _dequeue_and_enqueue(self, keys):
@@ -155,20 +161,26 @@ class PatchMocoLoss(nn.Module):
         self.queue_ptr[0] = ptr
 
     def forward(self, pred, target):
-        # Normalize the embeddings
-        pred = F.normalize(pred, dim=1)  # queries [B, D]
-        target = F.normalize(target, dim=1)  # keys [B, D]
+        B, N, D = pred.shape
 
-        l_pos = torch.einsum('nc,nc->n', [pred, target]).unsqueeze(-1) # Positive logits: Nx1
-        l_neg = torch.einsum('nc,ck->nk', [pred, self.queue.clone().detach().t()]) # Negative logits: NxK
-        logits = torch.cat([l_pos, l_neg], dim=1) # Logits: Nx(1+K)
+        pred = self.proj(pred) # projection
+        target = self.proj(target)
 
-        logits /= self.temperature # Apply temperature
+        pred = F.normalize(pred, dim=-1) # Normalize embeddings
+        target = F.normalize(target, dim=-1)
 
-        labels = torch.zeros(logits.shape[0], dtype=torch.long).to(pred.device) # Labels: positives are the first (0-th)
+        pred = pred.reshape(-1, self.proj_dim) # Reshape to treat all tokens independently
+        target = target.reshape(-1, self.proj_dim)
 
-        self._dequeue_and_enqueue(target) # Update the queue
-        return F.cross_entropy(logits, labels) # Compute cross entropy loss
+        l_pos = torch.einsum('nc,nc->n', [pred, target]).unsqueeze(-1) # positive - same sample
+        l_neg = torch.einsum('nc,ck->nk', [pred, self.queue.clone().detach().t()]) # negative - other samples
+
+        logits = torch.cat([l_pos, l_neg], dim=1) / self.temperature
+        labels = torch.zeros(B * N, dtype=torch.long).to(pred.device)
+
+        self._dequeue_and_enqueue(target)
+        loss = F.cross_entropy(logits, labels)
+        return loss
 
 class ConGenDetect(nn.Module):
     def __init__(self, moco: PatchMoco):

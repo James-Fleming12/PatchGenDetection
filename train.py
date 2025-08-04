@@ -58,6 +58,9 @@ def trainJEPA() -> JepaGenDetect:
                     param_k.data.mul_(m).add((1.-m) * param_q.data)
 
         print(f"Epoch {epoch} finished: Loss {loss.item(): .4f}")
+
+    print("JEPA finished training")
+
     patchdet = JepaGenDetect(lgen)
 
     return patchdet
@@ -87,6 +90,8 @@ def trainMOCO() -> ConGenDetect:
             with torch.no_grad():
                 for param_q, param_k in zip(lgen.encoder.parameters(), lgen.target_encoder.parameters()):
                     param_k.data.mul_(m).add((1.-m) * param_q.data)
+
+    print("MoCo finished training")
 
     patchdet = ConGenDetect(lgen)
 
