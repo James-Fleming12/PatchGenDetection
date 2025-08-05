@@ -1,6 +1,12 @@
 import torch
 from torch import nn
+from torch.utils.data import DataLoader, Dataset
 import torch.functional as F
+from torchvision import transforms
+
+import kagglehub
+import os
+from PIL import Image
 
 from main import ConGenDetect, JepaGenDetect, PatchJEPA, PatchMoco
 
@@ -21,11 +27,52 @@ def generate_nonoverlapping_masks(grid_h, grid_w, enc_ratio=0.3, pred_ratio=0.2)
 
     return enc_mask, pred_mask
 
-def trainJEPA() -> JepaGenDetect:
+class DalleDataset(Dataset):
+    def __init__(self, root_dir):
+        """root_dir should be the directory with all the images, with real and fake subfolders"""
+        self.root_dir = root_dir
+        assert(os.path.exists(root_dir), f"Root Directory {root_dir} Does not exist")
+
+        real_dir = os.path.join(root_dir, 'real')
+        assert(os.path.exists(real_dir), f"Subfolder real does not exist under {root_dir}")
+        self.real_images = [os.path.join(real_dir, f) for f in os.listdir(real_dir) 
+                           if f.endswith(('.png', '.jpg', '.jpeg'))]
+
+        fake_dir = os.path.join(root_dir, "fake-v2")
+        assert(os.path.exists(fake_dir), f"Subfolder fake-v2 does not exist under {root_dir}")
+        self.fake_images = [os.path.join(fake_dir, f) for f in os.listdir(fake_dir) 
+                           if f.endswith(('.png', '.jpg', '.jpeg'))]
+
+        self.imgs = self.fake_images + self.real_images
+        self.labels = [0] * len(self.fake_images) + [1] * len(self.real_images)
+
+        self.transform = transforms.Compose([
+            transforms.Resize((256, 256)),  # Resize to consistent dimensions
+            transforms.ToTensor(),           # Convert to tensor
+            transforms.Normalize(mean=[0.485, 0.456, 0.406],  # Standard ImageNet normalization
+                                std=[0.229, 0.224, 0.225])
+        ])
+
+    def __len__(self):
+        return len(self.all_images)
+
+    def __getitem__(self, idx):
+        img_path = self.all_images[idx]
+        image = Image.open(img_path).convert('RGB')  # Convert to RGB to ensure 3 channels
+
+        label = self.labels[idx]
+        image = self.transform(image)
+
+        return image, label
+
+    def downloadDaLLEData():
+        path = kagglehub.dataset_download("superpotato9/dalle-recognition-dataset", path=os.path.join(os.getcwd(), "data"))
+        print(f"Path to dataset files: {path}, should be in CurrentWorkingDirectory/data")
+
+def trainJEPA(dataloader: DataLoader) -> JepaGenDetect:
     num_epochs = 400
     m = 0.996 # momentum
 
-    unsupervised_loader = torch.DataLoader() # ...
     image_size = 0
     patch_size = 0
     optimizer = torch.optim.Adam()
@@ -33,7 +80,7 @@ def trainJEPA() -> JepaGenDetect:
     lgen = PatchJEPA(image_size, patch_size)
 
     for epoch in range(num_epochs):
-        for imgs in unsupervised_loader:
+        for imgs in dataloader:
             # generate valid patches for encoder and target
             B, C, H, W = imgs.shape
             for _ in range(B):
@@ -65,11 +112,10 @@ def trainJEPA() -> JepaGenDetect:
 
     return patchdet
 
-def trainMOCO() -> ConGenDetect:
+def trainMOCO(dataloader: DataLoader) -> ConGenDetect:
     num_epochs = 400
     m = 0.996 # momentum
 
-    unsupervised_loader = torch.DataLoader() # ...
     image_size = [0, 0]
     patch_size = [0, 0]
     queue_size = 0
@@ -78,7 +124,7 @@ def trainMOCO() -> ConGenDetect:
     lgen = PatchMoco(image_size, patch_size, queue_size)
 
     for epoch in range(num_epochs):
-        for imgs in unsupervised_loader:
+        for imgs in dataloader:
             pred, target = lgen(imgs)
 
             loss = lgen.loss(pred, target)
