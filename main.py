@@ -1,4 +1,4 @@
-from train import trainJEPA, trainMOCO, DalleDataset
+from train import trainJEPA, trainMOCO, DalleDataset, validateModel
 from model import ConGenDetect, JepaGenDetect
 
 from torch.utils.data import random_split, DataLoader
@@ -16,6 +16,9 @@ def main():
 
     jepa_model: JepaGenDetect = trainJEPA(train_loader)
     moco_model: ConGenDetect = trainMOCO(train_loader)
+
+    jepa_val = validateModel(jepa_model, val_loader)
+    moco_val = validateModel(moco_model, val_loader)
 
 if __name__=="__main__":
     main()

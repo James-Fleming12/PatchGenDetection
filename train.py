@@ -144,3 +144,6 @@ def trainMOCO(dataloader: DataLoader) -> ConGenDetect:
     patchdet = ConGenDetect(lgen)
 
     return patchdet
+
+def validateModel(model: ConGenDetect | JepaGenDetect, dataloader):
+    pass
