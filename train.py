@@ -46,10 +46,12 @@ class DalleDataset(Dataset):
         self.imgs = self.fake_images + self.real_images
         self.labels = [0] * len(self.fake_images) + [1] * len(self.real_images)
 
+        self.image_size = (256, 256)
+
         self.transform = transforms.Compose([
-            transforms.Resize((256, 256)),  # Resize to consistent dimensions
-            transforms.ToTensor(),           # Convert to tensor
-            transforms.Normalize(mean=[0.485, 0.456, 0.406],  # Standard ImageNet normalization
+            transforms.Resize(self.image_size),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], # Standard ImageNet normalization
                                 std=[0.229, 0.224, 0.225])
         ])
 
@@ -58,7 +60,7 @@ class DalleDataset(Dataset):
 
     def __getitem__(self, idx):
         img_path = self.all_images[idx]
-        image = Image.open(img_path).convert('RGB')  # Convert to RGB to ensure 3 channels
+        image = Image.open(img_path).convert('RGB') # Convert to RGB to ensure 3 channels
 
         label = self.labels[idx]
         image = self.transform(image)

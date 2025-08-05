@@ -1,9 +1,21 @@
-from train import trainJEPA, trainMOCO
+from train import trainJEPA, trainMOCO, DalleDataset
 from model import ConGenDetect, JepaGenDetect
 
+from torch.utils.data import random_split, DataLoader
+
 def main():
-    jepa_model: JepaGenDetect = trainJEPA()
-    moco_model: ConGenDetect = trainMOCO()
+    dataset = DalleDataset(root_dir='data/dalle-recognition-dataset')
+    train_size = int(0.8 * len(dataset))
+    val_size = len(dataset) - train_size
+
+    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+
+    batch_size = 200
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
+
+    jepa_model: JepaGenDetect = trainJEPA(train_loader)
+    moco_model: ConGenDetect = trainMOCO(train_loader)
 
 if __name__=="__main__":
     main()
